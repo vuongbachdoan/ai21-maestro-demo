@@ -43,7 +43,7 @@ An intelligent e-commerce platform that uses AI21 Maestro to provide personalize
    
    Create a `.env.local` file in the root directory:
    ```env
-   AI21_API_KEY=your_ai21_api_key_here
+   NEXT_PUBLIC_AI21_API_KEY=your_ai21_api_key_here
    ```
 
    To get your AI21 API key:
