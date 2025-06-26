@@ -28,7 +28,7 @@ An intelligent e-commerce platform that uses AI21 Maestro to provide personalize
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/vuongbachdoan/ai21-maetro-demo.git
+   git clone https://github.com/vuongbachdoan/ai21-maestro-demo.git
    cd clothing-store
    ```
 
