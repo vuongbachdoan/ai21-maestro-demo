@@ -1,68 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
-import AI21Client, { type MaestroMessage, type Requirement } from '@/lib/ai21-client';
+import AI21Client, { type Requirement } from '@/lib/ai21-client';
 import { callAI21Chat } from '@/lib/ai21-simple';
 
 const client = new AI21Client(process.env.AI21_API_KEY!);
 
-const SYSTEM_PROMPT = `You are a helpful fashion assistant for an online clothing store. Follow this exact process:
-
-1. Ask about ONE attribute at a time in this order: Style → Size → Color → Budget → Occasion
-2. Only ask the next question after getting an answer (or if user says "I don't know")
-3. After collecting all 5 attributes, ask: "Do you have any other specific requirements?"
-4. If no other requirements, provide this exact format:
-
-**PREFERENCES SUMMARY:**
-- Style: [value or "any"]
-- Size: [value or "any"]
-- Color: [value or "any"]
-- Budget: [low/medium/high or "any"]
-- Occasion: [value or "any"]
-
-**FILTER_PRODUCTS**
-
-DO NOT use tool_calls or any other format. Only use the exact format above.`;
-
-function extractPreferences(aiResponse: string) {
-  const lines = aiResponse.split('\n');
-  const preferences: any = {};
-  
-  lines.forEach(line => {
-    if (line.includes('- Style:')) preferences.style_preference = line.split(':')[1]?.trim().replace(/"/g, '') !== 'any' ? line.split(':')[1]?.trim().replace(/"/g, '') : undefined;
-    if (line.includes('- Size:')) preferences.size = line.split(':')[1]?.trim().replace(/"/g, '') !== 'any' ? line.split(':')[1]?.trim().replace(/"/g, '') : undefined;
-    if (line.includes('- Color:')) preferences.color_preference = line.split(':')[1]?.trim().replace(/"/g, '') !== 'any' ? line.split(':')[1]?.trim().replace(/"/g, '') : undefined;
-    if (line.includes('- Budget:')) preferences.budget_range = line.split(':')[1]?.trim().replace(/"/g, '') !== 'any' ? line.split(':')[1]?.trim().replace(/"/g, '') as 'low' | 'medium' | 'high' : undefined;
-    if (line.includes('- Occasion:')) preferences.occasion = line.split(':')[1]?.trim().replace(/"/g, '') !== 'any' ? line.split(':')[1]?.trim().replace(/"/g, '') : undefined;
-  });
-  
-  return preferences;
-}
-
 const REQUIREMENTS: Requirement[] = [
   {
-    name: "style_preference",
-    description: "Customer's preferred clothing style (casual, formal, trendy, classic, etc.)",
-    is_mandatory: false
+    name: 'style_preference',
+    description:
+      '- Identify and extract clothing style preference (casual, formal, trendy, classic, office, sporty) or "any".\n' +
+      '- Return in markdown: `- Style: <value>`',
   },
   {
-    name: "size",
-    description: "Customer's size requirements (XS, S, M, L, XL, etc.)",
-    is_mandatory: false
+    name: 'size',
+    description:
+      '- Identify clothing size if mentioned: XS, S, M, L, XL, XXL or "any".\n' +
+      '- Return in markdown: `- Size: <value>`',
   },
   {
-    name: "color_preference", 
-    description: "Customer's preferred colors or color families",
-    is_mandatory: false
+    name: 'color_preference',
+    description:
+      '- Identify preferred color(s) or "any".\n' +
+      '- Return in markdown: `- Color: <value>`',
   },
   {
-    name: "budget_range",
-    description: "Customer's budget range (low: under $50, medium: $50-150, high: over $150)",
-    is_mandatory: false
+    name: 'budget_range',
+    description:
+      '- Determine budget range: "low" (< $50), "medium" ($50–150), "high" (> $150), or "any".\n' +
+      '- Return in markdown: `- Budget: <value>`',
   },
   {
-    name: "occasion",
-    description: "The occasion or context for the clothing (work, casual, party, date, etc.)",
-    is_mandatory: false
-  }
+    name: 'occasion',
+    description:
+      '- Extract occasion (daily, party, office, travel, workout, etc.) or "any".\n' +
+      '- Return in markdown: `- Occasion: <value>`',
+  },
+  {
+    name: 'summary_trigger',
+    description:
+      '- Once all attributes are collected, return this exact block:\n' +
+      '```markdown\n' +
+      '**FILTER_PRODUCTS**\n' +
+      '- Style: ...\n' +
+      '- Size: ...\n' +
+      '- Color: ...\n' +
+      '- Budget: ...\n' +
+      '- Occasion: ...\n' +
+      '```',
+  },
 ];
 
 export async function POST(request: NextRequest) {
@@ -73,79 +58,123 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
-    // Use simple chat API (Maestro timing out)
-    const chatResponse = await callAI21Chat(message, process.env.AI21_API_KEY!, conversationHistory);
-    let aiResponse = chatResponse.choices[0].message.content;
-    
-    // Clean up tool_calls format and convert to proper summary
-    if (aiResponse.includes('<tool_calls>')) {
-      try {
-        const argsMatch = aiResponse.match(/"arguments":\s*({[^}]*})/);
-        if (argsMatch) {
-          const argsStr = argsMatch[1].replace(/([a-zA-Z_]+):/g, '"$1":').replace(/'/g, '"');
-          const args = JSON.parse(argsStr);
-          aiResponse = `**PREFERENCES SUMMARY:**
-- Style: ${args.style || 'any'}
-- Size: ${args.size || 'any'}
-- Color: ${args.color || 'any'}
-- Budget: ${args.budget || 'any'}
-- Occasion: ${args.occasion || 'any'}
+    // Step-by-step consultation via AI21 with injected rules
+    const chatResponse = await callAI21Chat(
+      message,
+      process.env.AI21_API_KEY!,
+      conversationHistory,
+      REQUIREMENTS
+    );
 
-**FILTER_PRODUCTS**`;
-        }
-      } catch (error) {
-        console.error('Failed to parse tool_calls:', error);
-        // Fallback: just remove tool_calls and show generic summary
-        aiResponse = aiResponse.replace(/<tool_calls>.*?<\/tool_calls>/s, 
-          `**PREFERENCES SUMMARY:**
-- Style: any
-- Size: any
-- Color: any
-- Budget: any
-- Occasion: any
+    const aiResponse = chatResponse.choices[0].message.content;
 
-**FILTER_PRODUCTS**`);
-      }
-    }
-    
-    // Check if AI wants to filter products
-    if (aiResponse.includes('**FILTER_PRODUCTS**')) {
-      const preferences = extractPreferences(aiResponse);
+    // Check for tool calls format
+    if (aiResponse.includes('<tool_calls>') && aiResponse.includes('filter_products')) {
+      const preferences = extractPreferencesFromToolCall(aiResponse);
       
+      // Call filter API
       const filterResponse = await fetch(`${request.nextUrl.origin}/api/products/filter`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(preferences)
       });
+      const filterData = await filterResponse.json();
       
-      if (filterResponse.ok) {
-        const { products = [] } = await filterResponse.json();
-        
-        const responseWithProducts = aiResponse.replace('**FILTER_PRODUCTS**', 
-          `\n\n**RECOMMENDED PRODUCTS:**\n${products.length > 0 ? products.map((p: any) => 
-            `- ${p.name} - $${p.price} (${p.colors.join(', ')}) - Sizes: ${p.sizes.join(', ')}`
-          ).join('\n') : 'No products match your preferences.'}`);
-        
-        return NextResponse.json({
-          response: responseWithProducts,
-          products,
-          requirements: null,
-          runId: 'chat-' + Date.now()
-        });
-      }
+      return NextResponse.json({
+        response: `I found ${filterData.count} products that match your preferences!`,
+        preferences,
+        products: filterData.products,
+        triggerFilter: true,
+      });
     }
-    
+
+    if (aiResponse.includes('**FILTER_PRODUCTS**')) {
+      const preferences = extractPreferencesFromSummary(aiResponse);
+      
+      // Call filter API
+      const filterResponse = await fetch(`${request.nextUrl.origin}/api/products/filter`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(preferences)
+      });
+      const filterData = await filterResponse.json();
+
+      return NextResponse.json({
+        response: `I found ${filterData.count} products that match your preferences!`,
+        preferences,
+        products: filterData.products,
+        triggerFilter: true,
+      });
+    }
+
     return NextResponse.json({
       response: aiResponse,
-      requirements: null,
-      runId: 'chat-' + Date.now()
+      preferences: {},
+      summary: {
+        style: 'any',
+        size: 'any',
+        color: 'any',
+        budget: 'any',
+        occasion: 'any',
+      },
+      shouldFilter: false,
     });
-
-  } catch (error) {
-    console.error('All API methods failed:', error);
-    return NextResponse.json(
-      { error: 'Failed to process request' },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error('Failed to run maestro:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+}
+
+function extractPreferencesFromToolCall(text: string) {
+  try {
+    const match = text.match(/"arguments":\s*({[^}]+})/);
+    if (match) {
+      const args = JSON.parse(match[1]);
+      const preferences: any = {};
+      
+      if (args.style && args.style !== 'any') preferences.style_preference = args.style;
+      if (args.size && args.size !== 'any') preferences.size = args.size;
+      if (args.color && args.color !== 'any') preferences.color_preference = args.color;
+      if (args.budget && args.budget !== 'any') preferences.budget_range = args.budget;
+      if (args.occasion && args.occasion !== 'any') preferences.occasion = args.occasion;
+      
+      console.log('Tool call preferences:', preferences);
+      return preferences;
+    }
+  } catch (e) {
+    console.error('Error parsing tool call:', e);
+  }
+  return {};
+}
+
+function extractPreferencesFromSummary(text: string) {
+  const lines = text.split('\n');
+  const preferences: any = {};
+
+  lines.forEach((line) => {
+    if (line.includes('- Style:')) {
+      const value = line.split(':')[1]?.trim();
+      if (value && value !== 'any') preferences.style_preference = value;
+    }
+    if (line.includes('- Size:')) {
+      const value = line.split(':')[1]?.trim();
+      if (value && value !== 'any') preferences.size = value;
+    }
+    if (line.includes('- Color:')) {
+      const value = line.split(':')[1]?.trim();
+      if (value && value !== 'any') preferences.color_preference = value;
+    }
+    if (line.includes('- Budget:')) {
+      const value = line.split(':')[1]?.trim();
+      if (value && value !== 'any') preferences.budget_range = value;
+    }
+    if (line.includes('- Occasion:')) {
+      const value = line.split(':')[1]?.trim();
+      if (value && value !== 'any') preferences.occasion = value;
+    }
+  });
+
+  console.log(preferences)
+
+  return preferences;
 }

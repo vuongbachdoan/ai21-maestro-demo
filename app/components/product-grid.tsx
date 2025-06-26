@@ -108,61 +108,56 @@ export default function ProductGrid() {
   const [activeFilters, setActiveFilters] = useState<any>(null)
 
   useEffect(() => {
-    // Listen for chat filter events
+    // Listen for chat filter events from Maestro API
     const handleChatFilters = (event: any) => {
-      const filters = event.detail
+      const { filters, products: apiProducts } = event.detail
       setActiveFilters(filters)
       
-      // Apply filters to products
-      const filtered = products.filter(product => {
-        // Style filtering
-        if (filters.style_preference && !product.style.some((s: string) => 
-          s.toLowerCase().includes(filters.style_preference.toLowerCase()))) {
-          return false
-        }
-        
-        // Size filtering
-        if (filters.size && !product.sizes.includes(filters.size.toUpperCase())) {
-          return false
-        }
-        
-        // Color filtering
-        if (filters.color_preference && !product.colors.some((c: string) => 
-          c.toLowerCase().includes(filters.color_preference.toLowerCase()))) {
-          return false
-        }
-        
-        // Budget filtering (convert price from IDR to USD for comparison)
-        if (filters.budget_range && filters.budget_range !== 'any') {
-          const priceUSD = product.price / 15000
-          const budgetRanges = { low: [0, 50], medium: [50, 150], high: [150, Infinity] }
-          const [min, max] = budgetRanges[filters.budget_range as keyof typeof budgetRanges] || [0, Infinity]
-          if (priceUSD < min || priceUSD > max) return false
-        }
-        
-        // Occasion filtering
-        if (filters.occasion && filters.occasion !== 'any') {
-          const occasionMap: Record<string, string[]> = {
-            'daily': ['casual', 'basic', 'comfort'],
-            'work': ['office', 'professional'],
-            'party': ['elegant', 'trendy'],
-            'casual': ['casual', 'streetwear']
+      // Use products from API if available, otherwise filter local products
+      if (apiProducts && apiProducts.length >= 0) {
+        // Map API products to match local product structure
+        const mappedProducts = apiProducts.map((apiProduct: any) => {
+          // Find matching local product for complete data
+          const localProduct = products.find(p => p.id === apiProduct.id)
+          return localProduct || {
+            ...apiProduct,
+            title: apiProduct.name || apiProduct.title,
+            images: ["https://static.nike.com/a/images/t_PDP_1728_v1/f_auto,q_auto:eco/c4f4b548-9a89-42ef-86f7-f3e89a22e704/AS+M+NK+CLUB+COACHES+JKT.png"],
+            description: `${apiProduct.title || apiProduct.name} - Premium quality clothing`,
+            gender: "Unisex",
+            productType: "clothing",
+            material: "Premium material",
+            features: ["comfortable", "stylish"],
+            availableStock: 20
           }
-          
-          const mappedStyles = occasionMap[filters.occasion.toLowerCase()] || [filters.occasion.toLowerCase()]
-          const hasOccasion = product.style.some((s: string) => 
-            mappedStyles.some(mapped => s.toLowerCase().includes(mapped))
-          ) || product.tags?.some((tag: string) => 
-            mappedStyles.some(mapped => tag.toLowerCase().includes(mapped))
-          )
-          
-          if (!hasOccasion) return false
-        }
-        
-        return true
-      })
-      
-      setFilteredProducts(filtered)
+        })
+        setFilteredProducts(mappedProducts)
+      } else {
+        // Fallback to local filtering
+        const filtered = products.filter(product => {
+          if (filters.style_preference && filters.style_preference !== 'any') {
+            const hasStyle = product.style.some((s: string) => 
+              s.toLowerCase() === filters.style_preference.toLowerCase()
+            )
+            if (!hasStyle) return false
+          }
+          if (filters.size && filters.size !== 'any') {
+            const filterSizes = filters.size.split(',').map((s: string) => s.trim().toUpperCase())
+            const hasSize = filterSizes.some((size: string) => product.sizes.includes(size))
+            if (!hasSize) return false
+          }
+          if (filters.color_preference && filters.color_preference !== 'any' && !product.colors.some((c: string) => 
+            c.toLowerCase().includes(filters.color_preference.toLowerCase()))) return false
+          if (filters.budget_range && filters.budget_range !== 'any') {
+            const priceUSD = product.price / 15000
+            const budgetRanges = { low: [0, 50], medium: [50, 150], high: [150, Infinity] }
+            const [min, max] = budgetRanges[filters.budget_range as keyof typeof budgetRanges] || [0, Infinity]
+            if (priceUSD < min || priceUSD > max) return false
+          }
+          return true
+        })
+        setFilteredProducts(filtered)
+      }
     }
 
     const handleChatReset = () => {

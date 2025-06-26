@@ -90,6 +90,7 @@ export default function ChatAssistant() {
       })
 
       const data = await response.json()
+      console.log('API Response:', data); // Debug log
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to get response')
@@ -97,7 +98,7 @@ export default function ChatAssistant() {
 
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: data.response,
+        text: data.response || data.fallback ? data.response : 'No response received',
         isBot: true,
         timestamp: new Date(),
       }
@@ -108,16 +109,19 @@ export default function ChatAssistant() {
       setConversationHistory(prev => [
         ...prev,
         { role: 'user', content: currentInput },
-        { role: 'assistant', content: data.response }
+        { role: 'assistant', content: data.response || 'No response' }
       ])
 
-      // Apply filters to home page if products are returned
-      if (data.products && data.products.length > 0) {
-        // Store filters in localStorage for home page to use
-        const preferences = extractPreferencesFromResponse(data.response);
+      // Apply filters to home page if products are returned or filtering is triggered
+      if ((data.products && data.products.length >= 0) || data.triggerFilter) {
+        console.log('Triggering filter with data:', data); // Debug log
+        const preferences = data.preferences || extractPreferencesFromResponse(data.response);
+        console.log('Extracted preferences:', preferences); // Debug log
         localStorage.setItem('chatFilters', JSON.stringify(preferences));
         // Trigger custom event to notify home page
-        window.dispatchEvent(new CustomEvent('chatFiltersApplied', { detail: preferences }));
+        window.dispatchEvent(new CustomEvent('chatFiltersApplied', { 
+          detail: { filters: preferences, products: data.products || [] } 
+        }));
       }
 
     } catch (error) {
