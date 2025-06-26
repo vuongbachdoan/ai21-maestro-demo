@@ -356,7 +356,7 @@ npm start
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `AI21_API_KEY` | Your AI21 Studio API key | Yes |
+| `NEXT_PUBLIC_AI21_API_KEY` | Your AI21 Studio API key | Yes |
 
 ## Troubleshooting
 
