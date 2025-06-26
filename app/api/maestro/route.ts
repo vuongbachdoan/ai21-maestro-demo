@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import AI21Client, { type Requirement } from '@/lib/ai21-client';
 import { callAI21Chat } from '@/lib/ai21-simple';
 
-const client = new AI21Client(process.env.AI21_API_KEY!);
+const client = new AI21Client(process.env.NEXT_PUBLIC_AI21_API_KEY!);
 
 const REQUIREMENTS: Requirement[] = [
   {
